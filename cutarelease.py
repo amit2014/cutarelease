@@ -26,8 +26,7 @@ import codecs
 import logging
 import optparse
 import json
-
-
+import xml.dom.minidom
 
 #---- globals and config
 
@@ -36,7 +35,33 @@ log = logging.getLogger("cutarelease")
 class Error(Exception):
     pass
 
+class PomFile(object):
+    def __init__(self, path):
+        with open(path, "r") as f:
+            self.path = path
+            self.xml = xml.dom.minidom.parse(f)
 
+    @property
+    def project_version(self):
+        project_node = self.xml.firstChild
+        version_node = next(node for node in project_node.childNodes if node.nodeName == "version")
+        return version_node.childNodes[0].data
+
+    @project_version.setter
+    def project_version(self, value):
+        project_node = self.xml.firstChild
+        version_node = next(node for node in project_node.childNodes if node.nodeName == "version")
+        version_node.childNodes[0].data = value
+
+    def __str__(self):
+        ## {{{ http://code.activestate.com/recipes/576750-pretty-print-xml
+        pretty_print = lambda x: '\n'.join([line for line in x.toprettyxml(indent=' '*2).split('\n') if line.strip()])
+        ## end of http://code.activestate.com/recipes/576750-pretty-print-xml }}}
+        return pretty_print(self.xml)
+
+    def save(self):
+        with open(self.path, "w") as f:
+            f.write(str(self))
 
 #---- main functionality
 
@@ -71,6 +96,8 @@ def cutarelease(project_name, version_files, dry_run=False):
         - A "package.json" file, typical of a node.js npm-using project.
           The package.json file must have a "version" field.
 
+        - A Maven pom.xml file.
+
         - TODO: A simple version file whose only content is a "1.2.3"-style version
           string.
 
@@ -90,6 +117,7 @@ def cutarelease(project_name, version_files, dry_run=False):
             "lib/%s.py" % project_name,
             "%s.js" % project_name,
             "lib/%s.js" % project_name,
+            "pom.xml"
         ]
         for candidate in candidates:
             if exists(candidate):
@@ -97,8 +125,8 @@ def cutarelease(project_name, version_files, dry_run=False):
                 break
         else:
             raise Error("could not find a version file: specify its path or "
-                "add one of the following to your project: '%s'"
-                % "', '".join(candidates))
+                        "add one of the following to your project: '%s'"
+                        % "', '".join(candidates))
         log.info("using '%s' as version file", version_files[0])
 
     parsed_version_files = [_parse_version_file(f) for f in version_files]
@@ -108,9 +136,9 @@ def cutarelease(project_name, version_files, dry_run=False):
     # Confirm
     if not dry_run:
         answer = query_yes_no("* * *\n"
-            "Are you sure you want cut a %s release?\n"
-            "This will involved commits and a push." % version,
-            default="no")
+                              "Are you sure you want cut a %s release?\n"
+                              "This will involved commits and a push." % version,
+                              default="no")
         print "* * *"
         if answer != "yes":
             log.info("user abort")
@@ -127,14 +155,14 @@ def cutarelease(project_name, version_files, dry_run=False):
     top_ver = changes[0]["version"]
     if top_ver != version:
         raise Error("changelog '%s' top section says "
-            "version %r, expected version %r: aborting"
-            % (changes_path, top_ver, version))
+                    "version %r, expected version %r: aborting"
+                    % (changes_path, top_ver, version))
     top_verline = changes[0]["verline"]
     if not top_verline.endswith(nyr):
         answer = query_yes_no("\n* * *\n"
-            "The changelog '%s' top section doesn't have the expected\n"
-            "'%s' marker. Has this been released already?"
-            % (changes_path, nyr), default="yes")
+                              "The changelog '%s' top section doesn't have the expected\n"
+                              "'%s' marker. Has this been released already?"
+                              % (changes_path, nyr), default="yes")
         print "* * *"
         if answer != "no":
             log.info("abort")
@@ -142,7 +170,7 @@ def cutarelease(project_name, version_files, dry_run=False):
     top_body = changes[0]["body"]
     if top_body.strip() == "(nothing yet)":
         raise Error("top section body is `(nothing yet)': it looks like "
-            "nothing has been added to this release")
+                    "nothing has been added to this release")
 
     # Commits to prepare release.
     changes_txt_before = changes_txt
@@ -191,10 +219,10 @@ def cutarelease(project_name, version_files, dry_run=False):
         marker = marker[0:-len(nyr)]
     if marker not in changes_txt:
         raise Error("couldn't find `%s' marker in `%s' "
-            "content: can't prep for subsequent dev" % (marker, changes_path))
+                    "content: can't prep for subsequent dev" % (marker, changes_path))
     next_verline = "%s %s%s" % (marker.rsplit(None, 1)[0], next_version, nyr)
     changes_txt = changes_txt.replace(marker + '\n',
-        "%s\n\n(nothing yet)\n\n\n%s\n" % (next_verline, marker))
+                                      "%s\n\n(nothing yet)\n\n\n%s\n" % (next_verline, marker))
     if not dry_run:
         f = codecs.open(changes_path, 'w', 'utf-8')
         f.write(changes_txt)
@@ -209,36 +237,40 @@ def cutarelease(project_name, version_files, dry_run=False):
             marker = '"version": "%s"' % version
             if marker not in ver_content:
                 raise Error("couldn't find `%s' version marker in `%s' "
-                    "content: can't prep for subsequent dev" % (marker, ver_file))
+                            "content: can't prep for subsequent dev" % (marker, ver_file))
             ver_content = ver_content.replace(marker,
-                '"version": "%s"' % next_version)
+                                              '"version": "%s"' % next_version)
         elif ver_file_type == "javascript":
             candidates = [
                 ("single", "var VERSION = '%s';" % version),
                 ("double", 'var VERSION = "%s";' % version),
-            ]
+                ]
             for quote_type, marker in candidates:
                 if marker in ver_content:
                     break
             else:
                 raise Error("couldn't find any candidate version marker in "
-                    "`%s' content: can't prep for subsequent dev: %r"
-                    % (ver_file, candidates))
+                            "`%s' content: can't prep for subsequent dev: %r"
+                            % (ver_file, candidates))
             if quote_type == "single":
                 ver_content = ver_content.replace(marker,
-                    "var VERSION = '%s';" % next_version)
+                                                  "var VERSION = '%s';" % next_version)
             else:
                 ver_content = ver_content.replace(marker,
-                    'var VERSION = "%s";' % next_version)
+                                                  'var VERSION = "%s";' % next_version)
         elif ver_file_type == "python":
             marker = "__version_info__ = %r" % (version_info,)
             if marker not in ver_content:
                 raise Error("couldn't find `%s' version marker in `%s' "
-                    "content: can't prep for subsequent dev" % (marker, ver_file))
+                            "content: can't prep for subsequent dev" % (marker, ver_file))
             ver_content = ver_content.replace(marker,
-                "__version_info__ = %r" % (next_version_tuple,))
+                                              "__version_info__ = %r" % (next_version_tuple,))
         elif ver_file_type == "version":
             ver_content = next_version
+        elif ver_file_type == "pom":
+            pom_file = PomFile(ver_file)
+            pom_file.project_version = "%s-SNAPSHOT" % next_version
+            ver_content = str(pom_file)
         else:
             raise Error("unknown ver_file_type: %r" % ver_file_type)
         if not dry_run:
@@ -315,6 +347,7 @@ def _parse_version_file(version_file):
     - python: Python script/module with `__version_info__ = (1, 2, 3)`
     - version: a VERSION.txt or VERSION file where the whole contents are
       the version string
+    - pom: Maven pom.xml file with a <version> tag
 
     @param version_file {str} Can be a path or "type:path", where "type"
         is one of the supported types.
@@ -354,9 +387,11 @@ def _parse_version_file(version_file):
                     break
         elif base in ("VERSION", "VERSION.txt"):
             version_file_type = "version"
+        elif version_file == "pom.xml":
+            version_file_type = "pom"
     if not version_file_type:
         raise RuntimeError("can't extract version from '%s': no idea "
-            "what type of file it it" % version_file)
+                           "what type of file it is" % version_file)
 
     if version_file_type == "json":
         obj = json.loads(content)
@@ -369,9 +404,15 @@ def _parse_version_file(version_file):
         version_info = _version_info_from_version(m.group(2))
     elif version_file_type == "version":
         version_info = _version_info_from_version(content.strip())
+    elif version_file_type == "pom":
+        pom_file = PomFile(version_file)
+        project_version = pom_file.project_version
+        if not project_version.endswith("-SNAPSHOT"):
+            raise RuntimeError("Project version <%s> does not end with -SNAPSHOT" % project_version)
+        version_info = _version_info_from_version(project_version.replace("-SNAPSHOT", ""))
     else:
         raise RuntimeError("unexpected version_file_type: %r"
-            % version_file_type)
+                           % version_file_type)
     return version_file_type, version_info
 
 
@@ -433,7 +474,7 @@ def parse_changelog(changes_path):
     if not sections:
         template = "## 1.0.0 (not yet released)\n\n(nothing yet)\n"
         raise Error("changelog '%s' must have at least one section, "
-            "suggestion:\n\n%s" % (changes_path, _indent(template)))
+                    "suggestion:\n\n%s" % (changes_path, _indent(template)))
     first_section_verline = sections[0][0]
     nyr = ' (not yet released)'
     #if not first_section_verline.endswith(nyr):
@@ -459,11 +500,11 @@ def parse_changelog(changes_path):
                 msg = ''
                 if version.endswith(')'):
                     msg = " (cutarelease is picky about the trailing %r " \
-                        "on the top version line. Perhaps you misspelled " \
-                        "that?)" % nyr
+                          "on the top version line. Perhaps you misspelled " \
+                          "that?)" % nyr
                 raise Error("changelog '%s' top section version '%s' is "
-                    "invalid: first char isn't a number%s"
-                    % (changes_path, version, msg))
+                            "invalid: first char isn't a number%s"
+                            % (changes_path, version, msg))
             item["version"] = version
         items.append(item)
 
@@ -499,7 +540,7 @@ def query_yes_no(question, default="yes"):
         elif choice in valid.keys():
             return valid[choice]
         else:
-            sys.stdout.write("Please respond with 'yes' or 'no' "\
+            sys.stdout.write("Please respond with 'yes' or 'no' " \
                              "(or 'y' or 'n').\n")
 ## end of http://code.activestate.com/recipes/577058/ }}}
 
@@ -548,27 +589,27 @@ def main(argv):
 
     # Parse options.
     parser = optparse.OptionParser(prog="cutarelease", usage='',
-        version="%prog " + __version__, description=__doc__,
-        formatter=_NoReflowFormatter())
+                                   version="%prog " + __version__, description=__doc__,
+                                   formatter=_NoReflowFormatter())
     parser.add_option("-v", "--verbose", dest="log_level",
-        action="store_const", const=logging.DEBUG,
-        help="more verbose output")
+                      action="store_const", const=logging.DEBUG,
+                      help="more verbose output")
     parser.add_option("-q", "--quiet", dest="log_level",
-        action="store_const", const=logging.WARNING,
-        help="quieter output (just warnings and errors)")
+                      action="store_const", const=logging.WARNING,
+                      help="quieter output (just warnings and errors)")
     parser.set_default("log_level", logging.INFO)
     parser.add_option("--test", action="store_true",
-        help="run self-test and exit (use 'eol.py -v --test' for verbose test output)")
+                      help="run self-test and exit (use 'eol.py -v --test' for verbose test output)")
     parser.add_option("-p", "--project-name", metavar="NAME",
-        help='the name of this project (default is the base dir name)',
-        default=basename(os.getcwd()))
+                      help='the name of this project (default is the base dir name)',
+                      default=basename(os.getcwd()))
     parser.add_option("-f", "--version-file", metavar="[TYPE:]PATH",
-        action='append', dest="version_files",
-        help='The path to the project file holding the version info. Can be '
-             'specified multiple times if more than one file should be updated '
-             'with new version info. If excluded, it will be guessed.')
+                      action='append', dest="version_files",
+                      help='The path to the project file holding the version info. Can be '
+                           'specified multiple times if more than one file should be updated '
+                           'with new version info. If excluded, it will be guessed.')
     parser.add_option("-n", "--dry-run", action="store_true",
-        help='Do a dry-run', default=False)
+                      help='Do a dry-run', default=False)
     opts, args = parser.parse_args()
     log.setLevel(opts.log_level)
 
@@ -597,7 +638,7 @@ if __name__ == "__main__":
             if not skip_it:
                 tb_path, tb_lineno, tb_func = traceback.extract_tb(tb)[-1][:3]
                 log.error("%s (%s:%s in %s)", exc_info[1], tb_path,
-                    tb_lineno, tb_func)
+                          tb_lineno, tb_func)
         else:  # string exception
             log.error(exc_info[0])
         if not skip_it:
