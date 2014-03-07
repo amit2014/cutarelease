@@ -27,6 +27,8 @@ import logging
 import optparse
 import json
 import xml.dom.minidom
+import jinja2
+from jinja2 import Environment, FunctionLoader
 
 #---- globals and config
 
@@ -65,7 +67,7 @@ class PomFile(object):
 
 #---- main functionality
 
-def cutarelease(project_name, version_files, dry_run=False):
+def cutarelease(project_name, version_files, dry_run=False, after_release=None):
     """Cut a release.
 
     @param project_name {str}
@@ -283,8 +285,11 @@ def cutarelease(project_name, version_files, dry_run=False):
         run('git commit %s %s -m "prep for future dev"' % (
             changes_path, ' '.join(version_files)))
         run('git push')
-
-
+        if after_release:
+            log.info("Running after-release hook")
+            template_values = { 'version': version, 'next_version': next_version, 'project_name': project_name, 'ver_file': ver_file }
+            cmd = _render_template(after_release, template_values)
+            run(cmd)
 
 #---- internal support routines
 
@@ -580,6 +585,12 @@ def _setup_command_prefix():
         prefix = "COPY_EXTENDED_ATTRIBUTES_DISABLE=1 "
     return prefix
 
+def _render_template(tpl, template_values):
+    def load_template(name):
+        return tpl;
+
+    env = Environment(loader=FunctionLoader(load_template))
+    return env.get_template("template").render(**template_values)
 
 #---- mainline
 
@@ -608,12 +619,14 @@ def main(argv):
                       help='The path to the project file holding the version info. Can be '
                            'specified multiple times if more than one file should be updated '
                            'with new version info. If excluded, it will be guessed.')
+    parser.add_option("-a", "--after-release", dest="after_release",
+                      action="store", help="command to run after release")
     parser.add_option("-n", "--dry-run", action="store_true",
                       help='Do a dry-run', default=False)
     opts, args = parser.parse_args()
     log.setLevel(opts.log_level)
 
-    cutarelease(opts.project_name, opts.version_files, dry_run=opts.dry_run)
+    cutarelease(opts.project_name, opts.version_files, dry_run=opts.dry_run, after_release=opts.after_release)
 
 
 ## {{{ http://code.activestate.com/recipes/577258/ (r5+)
