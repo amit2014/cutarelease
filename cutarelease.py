@@ -57,7 +57,7 @@ class PomFile(object):
 
     def __str__(self):
         ## {{{ http://code.activestate.com/recipes/576750-pretty-print-xml
-        pretty_print = lambda x: '\n'.join([line for line in x.toprettyxml(indent=' '*2).split('\n') if line.strip()])
+        pretty_print = lambda x: '\n'.join([line for line in x.toprettyxml(indent=' '*4).split('\n') if line.strip()])
         ## end of http://code.activestate.com/recipes/576750-pretty-print-xml }}}
         return pretty_print(self.xml)
 
