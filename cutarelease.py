@@ -174,6 +174,17 @@ def cutarelease(project_name, version_files, dry_run=False, after_release=None):
         raise Error("top section body is `(nothing yet)': it looks like "
                     "nothing has been added to this release")
 
+    # Warn user if releasing from a branch other than master
+    current_branch = run('git branch')
+    if current_branch != 'master':
+        answer = query_yes_no("\n* * *\n"
+                              "The current branch '%s' is not master\n"
+                              "Are you SURE you want to release from this branch?"
+                              % current_branch, default="no")
+        if answer != "yes":
+            log.info("user abort")
+            return
+
     # Commits to prepare release.
     changes_txt_before = changes_txt
     changes_txt = changes_txt.replace(" (not yet released)", "", 1)
