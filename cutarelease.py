@@ -175,7 +175,7 @@ def cutarelease(project_name, version_files, dry_run=False, after_release=None):
                     "nothing has been added to this release")
 
     # Warn user if releasing from a branch other than master
-    current_branch = run('git branch')
+    current_branch = os.popen('git rev-parse --abbrev-ref HEAD').read().strip()
     if current_branch != 'master':
         answer = query_yes_no("\n* * *\n"
                               "The current branch '%s' is not master\n"
